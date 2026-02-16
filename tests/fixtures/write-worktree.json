@@ -1,0 +1,7 @@
+{
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "{{PROJECT_ROOT}}/.worktrees/feature/src/index.ts",
+    "content": "console.log('hello')"
+  }
+}

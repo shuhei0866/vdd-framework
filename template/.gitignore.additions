@@ -1,0 +1,11 @@
+# VDD Framework - .gitignore に追記すべき行
+# これらの行をプロジェクトの .gitignore に追加してください。
+
+# Worktrees
+.worktrees/
+
+# Local docs (session logs, personal notes)
+.local-docs/
+
+# Agent memory (local/sensitive)
+.claude/agent-memory-local/
