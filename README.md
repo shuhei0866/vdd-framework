@@ -20,6 +20,16 @@ Human decides WHAT and WHY → AI decides HOW and executes
      (Vision + QA)              (Implementation + Review)
 ```
 
+## Design Philosophy: Autonomy Through Boundaries
+
+High autonomy and well-defined boundaries are two sides of the same coin.
+
+The conventional approach to AI safety is a whitelist — telling the AI exactly what it *can* do, step by step. This framework takes the opposite approach: **define what is forbidden, and everything else is permitted.** By explicitly specifying the small set of actions that must never happen (force-push to main, editing files outside a worktree, merging without review), the AI gains maximum freedom to make its own decisions within those boundaries.
+
+This works because the boundaries are **technically enforced, not just documented**. When an AI agent knows that a hook will physically block a dangerous operation, it doesn't need to second-guess every action — it can act decisively, knowing the guardrails will catch genuine mistakes. The branch strategy reinforces this: `release/*` branches in isolated worktrees give the AI a sandbox where it can work with full autonomy, while `main` and `develop` remain protected by structural rules.
+
+The result: **the clearer the boundaries, the more autonomous the agent becomes.** Not despite the constraints, but because of them.
+
 ## Architecture
 
 ```mermaid
@@ -51,7 +61,7 @@ graph TB
 
 ```bash
 # 1. Clone the framework
-git clone https://github.com/your-org/vdd-framework.git
+git clone https://github.com/shuhei0866/vdd-framework.git
 
 # 2. Navigate to your project
 cd your-project
