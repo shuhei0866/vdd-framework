@@ -105,9 +105,28 @@ Worktree isolation       →    worktree-guard hook (L5 deny)
 Kata (patterns)          →    Standard phases, TDD, review steps
 Humans judge, AI acts    →    Decision authority matrix
 Multi-perspective review →    3-layer QA model
+Goal + exit gate         →    Stop hooks verify completion, not steps
 ```
 
-Each principle reinforces the others. Technical enforcement makes autonomy safe. Worktree isolation enables parallel execution. Kata make enforcement predictable. The whole is greater than the sum of its parts.
+## Principle 8: Goal + Exit Gate — Constrain the WHAT, Not the HOW
+
+Instead of giving subagents step-by-step procedures (HOW), **declare the goal (WHAT) and verify completion with exit gates (Stop hooks)**.
+
+| Element | Role |
+|---------|------|
+| Goal declaration | "Complete the merge to develop" |
+| Exit gate (Stop hook, L4) | Mechanically verify completion conditions (spec exists, review done, PR merged) |
+| Guardrails (existing L5 hooks) | Block prohibited actions |
+| Tools (skills) | Available but optional — the AI decides whether to use them |
+
+```
+Before: L3 injection with 10-step procedure → context consumption, maintenance cost
+After:  L3 injection with goal + L4 Stop hook verification → AI chooses its own means
+```
+
+This extends Principle 2 (Maximum Autonomy Within Enforced Boundaries). Guardrails define "what must not happen." Exit gates define "what must be true at completion." Between those two constraints, the AI has full autonomy over HOW.
+
+Each principle reinforces the others. Technical enforcement makes autonomy safe. Worktree isolation enables parallel execution. Kata make enforcement predictable. Goal + exit gate reduces context overhead while maintaining completion guarantees. The whole is greater than the sum of its parts.
 
 ## Further Reading
 

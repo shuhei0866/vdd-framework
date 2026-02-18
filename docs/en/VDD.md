@@ -73,7 +73,17 @@ At the start of each feedback meeting, review the learnings file and recent deci
 
 ### Step 8: Process Reflection
 
-If the VDD process itself can be improved, record the insight in a learnings file. In the next feedback meeting, review accumulated learnings and decide whether VDD.md itself needs updating.
+If the VDD process itself can be improved, record the insight in `process/VDD-learnings.md`. In the next feedback meeting, review accumulated learnings and decide whether VDD.md itself needs updating.
+
+### VDD Learnings File
+
+The learnings file (`process/VDD-learnings.md`) serves as a **supplementary document** for the operating loop — distinct from the main artifacts (Vision / Decisions / Daily Score).
+
+- **Role**: A buffer before updating VDD.md. Accumulates observations that may or may not warrant changes to the process specification
+- **When to write**: Step 8 of the operating loop (process reflection)
+- **When to review**: Step 1 of the operating loop (review previous learnings)
+- **Recommended format**: "Context / What happened / Why / What to do next" (not enforced)
+- **Promotion to VDD.md**: Decided during feedback meetings based on accumulated evidence
 
 ## Meeting Cadence
 
