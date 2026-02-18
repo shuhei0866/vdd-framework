@@ -80,6 +80,17 @@ The AI works in an isolated worktree on a `release/*` branch:
 4. Human performs exploratory QA on the integration environment
 5. Human triggers promotion from integration to production
 
+#### Exit Gate: Completion Verification
+
+The goal for Phase 4 is: **"Complete the merge to the integration branch."** Rather than prescribing step-by-step procedures, the framework **declares the goal and verifies completion conditions mechanically via Stop hooks (L4)**.
+
+Example completion conditions verified by the exit gate:
+- Release specification is committed
+- Review has been executed (output of Phase 3)
+- PR is merged into the integration branch
+
+The agent chooses its own means. Whether it uses a skill, runs commands manually, or finds another path — as long as the completion conditions are met, the gate passes. See [Philosophy](./philosophy.md) for the "Goal + Exit Gate" principle.
+
 ## Required Artifacts
 
 Every release must produce:

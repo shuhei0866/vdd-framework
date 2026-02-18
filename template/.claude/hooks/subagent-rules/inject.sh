@@ -39,11 +39,19 @@ case "$AGENT_TYPE" in
 - TDD 必須: 実装コードより先にテストを書くこと
 - テスト実行: ${TEST_CMD}
 - ${CHECK_CMD}（型チェック + lint + テスト）を実装完了後に必ず実行"
-    # release/* ブランチの場合はレビュー義務を追加
+    # release/* ブランチの場合はゴール宣言 + ガードレールを注入
     case "$BRANCH" in
       release/*)
         RULES="$RULES
-- [release ブランチ] 実装完了後に /release-ready と /review-now を自身で実行すること（スキップ禁止）
+
+[release ブランチのゴール]
+あなたのゴールは「${INTEGRATION_BRANCH:-develop} にマージするところまでやり切ること」です。
+手段は自分で選んでください。Stop フック（出口ゲート）が完了条件を検証します:
+- リリース仕様書がコミットされていること
+- レビューが実行されていること
+- PR が ${INTEGRATION_BRANCH:-develop} にマージされていること
+
+ガードレール:
 - リリース仕様書のスコープ外の変更をしないこと"
         ;;
     esac
