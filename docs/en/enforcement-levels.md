@@ -214,6 +214,60 @@ Hooks are configured in `.claude/settings.json`:
 
 See [Adoption Levels](./adoption-levels.md) for the full breakdown of what each adoption level includes.
 
+## Anti-Patterns in Hook Design — Inspection Boundary Principle
+
+When hooks don't precisely scope their inspection targets, they **confuse content (user-written text) with metadata (tool structural information)**.
+
+### Principle: Clearly Scope What You Inspect
+
+Hooks must always be aware of *what* they are inspecting and distinguish between content and metadata.
+
+| Anti-Pattern | Problem | Fix |
+|-------------|---------|-----|
+| Grep the entire command string | Content inside `--body` args (PR descriptions, Mermaid diagrams) triggers false positives | Parse command structure, strip argument content before pattern matching |
+| Grep the entire transcript | Source code read via Read tool, or conversation text, triggers false positives | Use structured logs (see Observability below) instead of transcript scanning |
+| Hook inspects its own output patterns | Error message templates in hook source code are detected as "actual events" (self-reference problem) | Strictly limit inspection to actual event data |
+
+### Real Example
+
+A `commit-guard` hook greps for `gh pr merge` in the command string. But when creating a PR with `gh pr create --body "... diagram showing gh pr merge flow ..."`, the body content triggers a false block.
+
+## Observability Design
+
+Enforcement levels (L5-L2) ensure rules are followed. **Observability** answers a different question: "How are the rules being used?" It is **orthogonal** to enforcement levels and applies across all levels.
+
+### Separate Detection from Recording
+
+When aggregating deny/block events, **separate the detection layer (individual hooks) from the recording layer (aggregation hook)**.
+
+```
+Detection Layer (each deny/block hook)
+    │
+    ├── On deny/block, append to structured log
+    │   → .local-docs/friction-log.jsonl
+    │
+Aggregation Layer (Stop hook, dashboard, etc.)
+    │
+    └── Read the structured log (do NOT scan transcript)
+```
+
+### Why Avoid Transcript Scanning
+
+The transcript contains AI output, user input, and tool results — all interleaved. Grepping for specific event patterns in this mix leads to:
+
+- Source code read via the Read tool being misidentified as events
+- Hook names mentioned in conversation being counted as denials
+- Fragile detection that depends on transcript format
+
+### Recommended Structured Log Format
+
+```jsonl
+{"timestamp":"2026-02-18T13:00:00Z","hook":"commit-guard","decision":"deny","label":"branch-strategy-guard"}
+{"timestamp":"2026-02-18T13:05:00Z","hook":"worktree-guard","decision":"deny","label":"worktree-guard"}
+```
+
+Minimum fields: `timestamp` (ISO 8601), `hook` (script name), `decision` (`deny`|`block`|`ask`), `label` (human-readable).
+
 ## Further Reading
 
 - [Philosophy](./philosophy.md) — "Enforce rules technically, not just document them"
