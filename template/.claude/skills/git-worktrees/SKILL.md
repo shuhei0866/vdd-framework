@@ -94,7 +94,19 @@ Determine the base branch for the worktree:
 BASE_BRANCH="${SPECIFIED_BASE:-main}"
 ```
 
-### 3. Create Worktree
+### 3. Sync Base Branch with Remote
+
+Fetch the latest state of the base branch before creating the worktree. If the local branch is stale, you may branch from outdated code and miss recently added files or changes.
+
+```bash
+# Fetch from remote if the branch exists there (skip for local-only branches)
+git fetch origin "$BASE_BRANCH" 2>/dev/null
+```
+
+- Remote branch exists → branch from `origin/$BASE_BRANCH` (always up-to-date)
+- Local-only branch (e.g., unpushed `release/*`) → branch from local `$BASE_BRANCH`
+
+### 4. Create Worktree
 
 ```bash
 # Determine full path
@@ -107,12 +119,16 @@ case $LOCATION in
     ;;
 esac
 
-# Create worktree with new branch from base
-git worktree add "$path" -b "$BRANCH_NAME" "$BASE_BRANCH"
+# Branch from remote if available, otherwise from local
+if git rev-parse --verify "origin/$BASE_BRANCH" >/dev/null 2>&1; then
+  git worktree add "$path" -b "$BRANCH_NAME" "origin/$BASE_BRANCH"
+else
+  git worktree add "$path" -b "$BRANCH_NAME" "$BASE_BRANCH"
+fi
 cd "$path"
 ```
 
-### 4. Run Project Setup
+### 5. Run Project Setup
 
 Auto-detect and run appropriate setup:
 
@@ -131,7 +147,7 @@ if [ -f pyproject.toml ]; then poetry install; fi
 if [ -f go.mod ]; then go mod download; fi
 ```
 
-### 5. Verify Clean Baseline
+### 6. Verify Clean Baseline
 
 Run tests to ensure worktree starts clean:
 
@@ -147,7 +163,7 @@ go test ./...
 
 **If tests pass:** Report ready.
 
-### 6. Report Location
+### 7. Report Location
 
 ```
 Worktree ready at <full-path>
