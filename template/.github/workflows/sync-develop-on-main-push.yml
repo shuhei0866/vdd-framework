@@ -1,0 +1,66 @@
+name: Sync develop on main push
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-develop
+  cancel-in-progress: false
+
+jobs:
+  sync-develop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: develop
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge main into develop
+        id: merge
+        run: |
+          git fetch origin main
+          if git merge origin/main --no-edit; then
+            echo "conflict=false" >> $GITHUB_OUTPUT
+          else
+            git merge --abort
+            echo "conflict=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push if no conflict
+        if: steps.merge.outputs.conflict == 'false'
+        run: git push origin develop
+
+      - name: Create PR if conflict
+        if: steps.merge.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SYNC_BRANCH="chore/sync-develop-$(date +%Y%m%d%H%M%S)"
+          git switch -c "$SYNC_BRANCH" origin/main
+          git push origin "$SYNC_BRANCH"
+
+          gh pr create \
+            --base develop \
+            --head "$SYNC_BRANCH" \
+            --title "chore: main → develop 同期 (コンフリクトあり)" \
+            --body "## main → develop 同期
+
+          main への昇格後の自動同期でコンフリクトが発生しました。手動で解決してください。
+
+          ---
+
+          **この PR は \"Create a merge commit\" でマージしてください。Squash merge 禁止。**
+
+          この PR は GitHub Actions により自動生成されています。"
