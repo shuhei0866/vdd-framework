@@ -1,6 +1,6 @@
 {
   "tool_name": "Bash",
   "tool_input": {
-    "command": "git checkout main"
+    "command": "git checkout feature/new-thing"
   }
 }

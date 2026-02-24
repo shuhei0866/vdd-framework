@@ -194,9 +194,22 @@ test_worktree_guard() {
   input=$(prepare_fixture "$FIXTURES_DIR/write-claude-dir.json" "$repo")
   assert_allow ".claude/ 配下への Write は許可" "$hook" "$input" "$repo"
 
-  # .worktrees/ 配下への Write -> 許可
-  input=$(prepare_fixture "$FIXTURES_DIR/write-worktree.json" "$repo")
-  assert_allow ".worktrees/ 配下への Write は許可" "$hook" "$input" "$repo"
+  # 実際のワークツリー内のファイルへの Write -> 許可
+  # git worktree list --porcelain で動的検出するため、実際のワークツリーを作成
+  local wt_dir
+  wt_dir=$(mktemp -d)
+  TEMP_DIRS+=("$wt_dir")
+  cd "$repo"
+  git branch feature/wt-test 2>/dev/null || true
+  git worktree add "$wt_dir" feature/wt-test --quiet 2>/dev/null || true
+  local wt_real_path
+  wt_real_path=$(cd "$wt_dir" && pwd -P)
+  local wt_input
+  wt_input=$(cat << EOF
+{"tool_name": "Write", "tool_input": {"file_path": "$wt_real_path/src/index.ts", "content": "console.log('hello')"}}
+EOF
+)
+  assert_allow "実際のワークツリー内ファイルへの Write は許可" "$hook" "$wt_input" "$repo"
 
   # プロジェクト外ファイルへの Write -> 許可
   input=$(prepare_fixture "$FIXTURES_DIR/write-outside-project.json" "$repo")
@@ -251,9 +264,10 @@ test_commit_guard() {
   input=$(cat "$FIXTURES_DIR/bash-no-verify.json")
   assert_deny "--no-verify は deny" "$hook" "$input" "$repo"
 
-  # git checkout main (メインWT) -> deny
+  # git checkout feature/* (メインWT) -> deny
+  # 注意: develop/main/master への切り替えは永続ブランチ同期として許可されている
   input=$(cat "$FIXTURES_DIR/bash-checkout-main.json")
-  assert_deny "メインWT での git checkout は deny" "$hook" "$input" "$repo"
+  assert_deny "メインWT での git checkout (feature) は deny" "$hook" "$input" "$repo"
 
   # git stash pop (メインWT) -> deny
   input=$(cat "$FIXTURES_DIR/bash-stash-pop.json")

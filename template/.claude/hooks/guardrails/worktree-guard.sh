@@ -16,6 +16,9 @@ else
   exit 0
 fi
 
+# パストラバーサル防止: .. を含むパスを正規化
+FILE_PATH=$(realpath -m "$FILE_PATH" 2>/dev/null || echo "$FILE_PATH")
+
 if [ -z "${FILE_PATH:-}" ]; then
   exit 0
 fi
@@ -37,13 +40,26 @@ if [ "$GIT_DIR" != "$GIT_COMMON_DIR" ] && [ "$GIT_DIR" != ".git" ]; then
   exit 0
 fi
 
-# ファイルパスがワークツリー配下(.worktrees/)かチェック
-# CWD がメインワークツリーでも、ファイルパスがワークツリー内なら許可
-case "$FILE_PATH" in
-  "$PROJECT_ROOT"/.worktrees/*)
-    exit 0
-    ;;
-esac
+# ファイルパスがワークツリー内かチェック（CWD がメインWT でもファイル自体がWT内なら許可）
+while IFS= read -r line; do
+  case "$line" in
+    worktree\ *)
+      WT_PATH="${line#worktree }"
+      # メインワークツリーはスキップ
+      if [ "$WT_PATH" = "$PROJECT_ROOT" ]; then
+        continue
+      fi
+      # ワークツリーパスも正規化してから比較（パストラバーサル対策）
+      WT_PATH_NORMALIZED=$(realpath -m "$WT_PATH" 2>/dev/null || echo "$WT_PATH")
+      # ファイルがこのワークツリー内にある場合は許可
+      case "$FILE_PATH" in
+        "$WT_PATH_NORMALIZED"/*)
+          exit 0
+          ;;
+      esac
+      ;;
+  esac
+done < <(git worktree list --porcelain 2>/dev/null)
 
 # ファイルパスがプロジェクトルート配下かチェック
 case "$FILE_PATH" in
@@ -71,7 +87,7 @@ cat << DENY
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "[ワークツリーガード] メインワークツリーでのファイル編集はブロックされています。\n\n対処法: ユーザーに報告し、\`git worktree add .worktrees/<name> <branch>\` でワークツリーを作成してそこで作業してください。\n\n編集しようとしたファイル: ${RELATIVE_PATH}"
+    "permissionDecisionReason": "[ワークツリーガード] メインワークツリーでのファイル編集はブロックされています。\n\n⚠️ 重要: Edit, Write, Bash redirect など別の方法でのリトライは禁止です。すべて同様にブロックされます。\n\n対処法: ユーザーに報告し、\`git worktree add .worktrees/<name> <branch>\` でワークツリーを作成してそこで作業してください。\n\n編集しようとしたファイル: ${RELATIVE_PATH}"
   }
 }
 DENY

@@ -18,16 +18,19 @@ if [ -z "${PROMPT:-}" ]; then
 fi
 
 # 実装系キーワードの検出（日本語 + 英語）
+# 誤発火のコストは低い（L2 リマインドのみ）ため、広めにマッチさせる
+# 実装意図を読み取り専用パターンより優先する（「実装して、理由も教えて」→ remind）
 if echo "$PROMPT" | grep -qiE '実装|作って|追加|修正|変更|削除|更新|移行|導入|改修|直して|書いて|組み込|統合|fix|implement|add|create|build|機能|feature|リファクタ|refactor|deploy|migrate'; then
   # 現在のブランチを確認
   BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
 
-  if [ "$BRANCH" = "main" ]; then
-    cat << 'REMIND'
+  if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "develop" ]; then
+    BRANCH_MSG="現在 ${BRANCH} ブランチにいます。"
+    cat << REMIND
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "[RDD リマインド] 実装リクエストを検出しました。RDD ワークフローに従ってください: (1) 設計対話で方針を決める (2) リリース仕様書を作成 (3) release/* ブランチで実装 (4) /release-ready で自己評価。現在 main ブランチにいます。まず release/* ブランチを作成してください。"
+    "additionalContext": "[RDD リマインド] 実装リクエストを検出しました。RDD ワークフローに従ってください: (1) 設計対話で方針を決める (2) リリース仕様書を作成 (3) release/* ブランチで実装 (4) /release-ready で自己評価。${BRANCH_MSG} まず /git-worktrees で release/* ブランチを作成してください。"
   }
 }
 REMIND
