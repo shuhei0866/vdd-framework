@@ -4,7 +4,7 @@
 # メインワークツリーでの保護ブランチ (main/develop) への直接コミット、
 # --no-verify によるフックスキップ、force push、ブランチ切り替え、
 # main への直接マージ（hotfix 除く）、develop ブランチ削除などを検出してブロックする。
-# gh pr merge による main 向け PR マージもブロック。
+# gh pr merge による main 向け PR マージもブロック（hotfix/*, chore/promote-main-*, develop は除く）。
 
 set -uo pipefail
 
@@ -21,9 +21,10 @@ if [ -z "${COMMAND:-}" ]; then
   exit 0
 fi
 
-# パターンマッチ用: 引用符内のテキストを除去（コマンド引数の誤検出防止）
-# 値の抽出には元の COMMAND を使用する
-COMMAND_FOR_MATCH=$(echo "$COMMAND" | sed -E "s/\"[^\"]*\"//g; s/'[^']*'//g")
+# パターンマッチ用: 引用符内のテキストをプレースホルダーに置換（コマンド引数の誤検出防止）
+# 完全に除去するとコマンド構造が壊れるため（例: git -C "/path" → git -C ）、
+# _Q_ に置換してトークン位置を保持する。値の抽出には元の COMMAND を使用する。
+COMMAND_FOR_MATCH=$(echo "$COMMAND" | sed -E "s/\"[^\"]*\"/_Q_/g; s/'[^']*'/_Q_/g")
 
 # git/gh コマンド以外はスキップ
 case "$COMMAND_FOR_MATCH" in
@@ -40,20 +41,34 @@ esac
 # -C パスおよび cd パスを考慮して判定する。
 if echo "$COMMAND_FOR_MATCH" | grep -qE 'git\s+(-C\s+\S+\s+)?commit\b'; then
   # コマンドから -C パスを抽出（あれば）
-  GIT_C_PATH=$(echo "$COMMAND" | sed -nE 's/.*git[[:space:]]+-C[[:space:]]+([^ ]+).*/\1/p')
+  # クォート付きパス ("path" or 'path') とクォートなしパスの両方に対応
+  GIT_C_PATH=$(echo "$COMMAND" | sed -nE 's/.*git[[:space:]]+-C[[:space:]]+"([^"]+)".*/\1/p')
+  if [ -z "$GIT_C_PATH" ]; then
+    GIT_C_PATH=$(echo "$COMMAND" | sed -nE "s/.*git[[:space:]]+-C[[:space:]]+'([^']+)'.*/\1/p")
+  fi
+  if [ -z "$GIT_C_PATH" ]; then
+    GIT_C_PATH=$(echo "$COMMAND" | sed -nE 's/.*git[[:space:]]+-C[[:space:]]+([^ "'"'"']+).*/\1/p')
+  fi
 
   # cd <path> パターンを検出（cd path && git commit など）
   # cd が git commit より前にある場合のみ抽出（後ろにある場合は無視）
   BEFORE_GIT=$(echo "$COMMAND" | sed -nE 's/(.*)(git[[:space:]]+(-C[[:space:]]+[^ ]+[[:space:]]+)?commit\b.*)/\1/p')
-  CD_PATH=$(echo "$BEFORE_GIT" | sed -nE 's/.*cd[[:space:]]+([^ &;|]+).*/\1/p')
+  # クォート付き cd パスに対応
+  CD_PATH=$(echo "$BEFORE_GIT" | sed -nE 's/.*cd[[:space:]]+"([^"]+)".*/\1/p')
+  if [ -z "$CD_PATH" ]; then
+    CD_PATH=$(echo "$BEFORE_GIT" | sed -nE "s/.*cd[[:space:]]+'([^']+)'.*/\1/p")
+  fi
+  if [ -z "$CD_PATH" ]; then
+    CD_PATH=$(echo "$BEFORE_GIT" | sed -nE 's/.*cd[[:space:]]+([^ "&;|'"'"']+).*/\1/p')
+  fi
 
   if [ -n "$GIT_C_PATH" ]; then
-    # git -C <path> パターン
+    # git -C <path> パターン（既存）
     GIT_COMMON_DIR=$(git -C "$GIT_C_PATH" rev-parse --git-common-dir 2>/dev/null || echo "")
     GIT_DIR=$(git -C "$GIT_C_PATH" rev-parse --git-dir 2>/dev/null || echo "")
     BRANCH=$(git -C "$GIT_C_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
   elif [ -n "$CD_PATH" ] && [ -d "$CD_PATH" ]; then
-    # cd <path> パターン: cd でディレクトリ変更後に git commit するケース
+    # cd <path> パターン（新規）: cd でディレクトリ変更後に git commit するケース
     GIT_COMMON_DIR=$(git -C "$CD_PATH" rev-parse --git-common-dir 2>/dev/null || echo "")
     GIT_DIR=$(git -C "$CD_PATH" rev-parse --git-dir 2>/dev/null || echo "")
     BRANCH=$(git -C "$CD_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
@@ -97,6 +112,8 @@ fi
 
 # --- チェック 2: force push to main/master ---
 if echo "$COMMAND_FOR_MATCH" | grep -qE 'git\s+push\s.*--force|git\s+push\s.*-f\b'; then
+  # COMMAND_FOR_MATCH のみでチェック（クォート内は _Q_ プレースホルダーに置換済み）
+  # 元の COMMAND も検索すると push オプション内の main 等で誤検出する
   if echo "$COMMAND_FOR_MATCH" | grep -qE '\b(main|master)\b'; then
     cat << 'DENY'
 {
@@ -188,8 +205,8 @@ if echo "$COMMAND_FOR_MATCH" | grep -qE '(^|&&|\|\||[;|])\s*gh\s+pr\s+merge'; th
     HEAD_BRANCH=$(echo "$PR_INFO" | jq -r '.headRefName // empty')
 
     if [ "$BASE_BRANCH" = "main" ] || [ "$BASE_BRANCH" = "master" ]; then
-      # hotfix/* は例外
-      if ! echo "$HEAD_BRANCH" | grep -qE '^hotfix/'; then
+      # hotfix/*, chore/promote-main-*, develop は例外（昇格PR許可）
+      if ! echo "$HEAD_BRANCH" | grep -qE '^hotfix/|^chore/promote-main-|^develop$'; then
         cat << DENY
 {
   "hookSpecificOutput": {

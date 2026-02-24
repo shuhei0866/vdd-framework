@@ -4,9 +4,11 @@
 # ローカル環境: main 向け PR の approve/merge のみブロック。
 #               release/* → develop のマージは許可。
 #
-# クラウド環境 (CLAUDE_CLOUD=1): 全 PR の approve をブロック（自己 approve 防止）。
-#               merge は develop 向けのみ許可（レビュアー approve 確認後）。
-#               main 向け merge は両環境でブロック。
+# クラウド環境 (CLAUDE_CLOUD=1):
+#   - 自己 approve（PR 作成者 = 現在のユーザー）: 全 PR をブロック
+#   - 代理 approve（PR 作成者 ≠ 現在のユーザー）: develop 向けのみ許可、main 向けはブロック
+#   - merge は develop 向けのみ許可（独立レビュアー approve 確認後）。
+#   - main 向け merge は両環境でブロック。
 #
 # 両環境共通: curl / gh api による GitHub approve API 直接呼び出しもブロック。
 
@@ -24,6 +26,10 @@ fi
 if [ -z "${COMMAND:-}" ]; then
   exit 0
 fi
+
+# パターンマッチ用: 引用符内のテキストをプレースホルダーに置換（body テキスト誤検出防止）
+# 値の抽出（extract_pr_number, get_pr_base）には元の COMMAND を使用する
+COMMAND_FOR_MATCH=$(echo "$COMMAND" | sed -E "s/\"[^\"]*\"/_Q_/g; s/'[^']*'/_Q_/g")
 
 # --- クラウド環境判定 ---
 IS_CLOUD="${CLAUDE_CLOUD:-0}"
@@ -47,7 +53,13 @@ DENY
 # curl や gh api で GitHub REST API の merge/review エンドポイントを直接叩くのをブロック
 # パターン: PUT /repos/{owner}/{repo}/pulls/{number}/merge
 #           POST /repos/{owner}/{repo}/pulls/{number}/reviews (approve)
-if echo "$COMMAND" | grep -qiE '(curl|gh\s+api)\s'; then
+#
+# 検出戦略:
+# - 「curl/gh api コマンドか？」の判定 → COMMAND_FOR_MATCH を使用
+#   (body テキスト内の "curl" を誤検出しないため)
+# - 「API endpoint に /pulls/.../merge 等が含まれるか？」 → COMMAND を使用
+#   (クォート付き URL が _Q_ に置換されてパターンが消えるのを防ぐため)
+if echo "$COMMAND_FOR_MATCH" | grep -qiE '(curl|gh\s+api)\s'; then
   # merge API の検出: /pulls/xxx/merge（main 向けのみブロック）
   if echo "$COMMAND" | grep -qiE '/pulls/[0-9]+/merge'; then
     # curl/gh api での merge は base ブランチの判別が困難なため、安全のためブロック
@@ -62,7 +74,8 @@ if echo "$COMMAND" | grep -qiE '(curl|gh\s+api)\s'; then
 fi
 
 # gh pr コマンド以外はスキップ（curl/gh api は上でチェック済み）
-case "$COMMAND" in
+# COMMAND_FOR_MATCH を使用して body テキスト内の "gh pr" を無視
+case "$COMMAND_FOR_MATCH" in
   *gh\ pr\ *)
     ;;
   *)
@@ -117,43 +130,77 @@ extract_pr_number() {
   echo "$args" | grep -oE '\b[0-9]+\b' | head -1
 }
 
-# --- ヘルパー: approve の deny 判定 ---
-# クラウド環境: 全 PR をブロック（自己 approve 防止、常に true）
-# ローカル環境: main/master または不明の場合のみ true
+# --- ヘルパー: 代理 approve 判定（クラウド環境用）---
+# PR 作成者と現在の GitHub ユーザーが異なる場合は代理 approve (true)
+# フェイルクローズ: 取得失敗時は false（代理ではない = ブロック）
+is_proxy_approve() {
+  local pr_num="$1"
+  local pr_author current_user
+
+  # PR 作成者を取得
+  if [ -n "$pr_num" ]; then
+    pr_author=$(gh pr view "$pr_num" --json author -q .author.login 2>/dev/null) || true
+  else
+    pr_author=$(gh pr view --json author -q .author.login 2>/dev/null) || true
+  fi
+
+  # 現在の GitHub ユーザーを取得
+  current_user=$(gh api user -q .login 2>/dev/null) || true
+
+  # 取得失敗時はフェイルクローズ
+  if [ -z "$pr_author" ] || [ -z "$current_user" ]; then
+    return 1  # false: 代理ではない（安全のためブロック）
+  fi
+
+  # 異なるユーザーなら代理 approve
+  [ "$pr_author" != "$current_user" ]
+}
+
+# --- ヘルパー: approve の deny 判定（ターゲットブランチ） ---
+# main/master または不明の場合のみ true（環境非依存）
 should_deny_approve() {
   local base="$1"
-  if [ "$IS_CLOUD" = "1" ]; then
-    return 0  # クラウドでは常にブロック
-  fi
   [ "$base" = "main" ] || [ "$base" = "master" ] || [ "$base" = "__UNKNOWN__" ]
 }
 
 # --- ヘルパー: merge の deny 判定 ---
 # 両環境共通: main/master または不明の場合のみブロック
-# クラウド環境でも develop 向け merge は許可（レビュアー approve 確認後）
+# クラウド環境でも develop 向け merge は許可（独立レビュアー approve 確認後）
 should_deny_merge() {
   local base="$1"
   [ "$base" = "main" ] || [ "$base" = "master" ] || [ "$base" = "__UNKNOWN__" ]
 }
 
 # --- チェック 1: gh pr review --approve ---
-if echo "$COMMAND" | grep -qE 'gh\s+pr\s+review\s.*(-a\b|--approve)'; then
+# COMMAND_FOR_MATCH でパターンマッチし、extract_pr_number には元の COMMAND を使用
+if echo "$COMMAND_FOR_MATCH" | grep -qE 'gh\s+pr\s+review\s.*(-a\b|--approve)'; then
   PR_NUM=$(extract_pr_number "$COMMAND" "review")
   BASE=$(get_pr_base "$PR_NUM")
 
-  if should_deny_approve "$BASE"; then
-    if [ "$IS_CLOUD" = "1" ]; then
-      emit_deny "クラウド環境では全 PR の approve がブロックされています。approve は独立レビュアーが実行します。"
+  if [ "$IS_CLOUD" = "1" ]; then
+    # クラウド環境: 代理 approve（PR 作成者 ≠ 現在のユーザー）は develop 向けのみ許可
+    if is_proxy_approve "$PR_NUM"; then
+      # 代理 approve: main/master/__UNKNOWN__ のみブロック
+      if should_deny_approve "$BASE"; then
+        REASON="main 向け PR は代理 approve でもブロックされています。"
+        [ "$BASE" = "__UNKNOWN__" ] && REASON="PR のターゲットブランチを確認できなかったため、安全のためブロックしました。"
+        emit_deny "${REASON} develop → main の昇格は人間が承認・実行してください。"
+      fi
     else
-      REASON="main 向け PR の approve はブロックされています。"
-      [ "$BASE" = "__UNKNOWN__" ] && REASON="PR のターゲットブランチを確認できなかったため、安全のためブロックしました。"
-      emit_deny "${REASON} develop → main の昇格は人間が承認・実行してください。"
+      # 自己 approve（または判定不能）: 常にブロック
+      emit_deny "VPS 環境での自己 approve はブロックされています。代理 approve（PR 作成者と異なるアカウント）は develop 向け PR で許可されます。"
     fi
+  elif should_deny_approve "$BASE"; then
+    # ローカル環境: main/master/__UNKNOWN__ のみブロック
+    REASON="main 向け PR の approve はブロックされています。"
+    [ "$BASE" = "__UNKNOWN__" ] && REASON="PR のターゲットブランチを確認できなかったため、安全のためブロックしました。"
+    emit_deny "${REASON} develop → main の昇格は人間が承認・実行してください。"
   fi
 fi
 
 # --- チェック 2: gh pr merge ---
-if echo "$COMMAND" | grep -qE 'gh\s+pr\s+merge'; then
+# COMMAND_FOR_MATCH でパターンマッチし、extract_pr_number には元の COMMAND を使用
+if echo "$COMMAND_FOR_MATCH" | grep -qE 'gh\s+pr\s+merge'; then
   PR_NUM=$(extract_pr_number "$COMMAND" "merge")
   BASE=$(get_pr_base "$PR_NUM")
 
